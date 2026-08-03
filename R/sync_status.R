@@ -264,7 +264,7 @@ sync_status <- function() {
       } else {
         shiny::tagList(
           shiny::actionButton("btn_back", "Back to Edit", class = "btn-secondary", style = "margin-right: 10px;"),
-          shiny::actionButton("btn_execute", "Confirm & Execute", class = "btn-success", style = "font-weight: bold; padding: 8px 20px;")
+          shiny::actionButton("btn_execute", "Confirm", class = "btn-success", style = "font-weight: bold; padding: 8px 20px;")
         )
       }
     })
