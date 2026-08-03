@@ -72,9 +72,10 @@ sync_setup <- function() {
       workflowr::wflow_start(".", existing = TRUE)
       cli::cli_alert_success("Workflowr initialized!")
     } else {
-      cli::cli_alert_info("RStudio will now create and switch to the new project: {.file {new_name}}")
+      cli::cli_alert_info("RStudio will now create and attempt to switch to the new project: {.file {new_name}}")
       cli::cli_alert_danger("IMPORTANT: This will restart your R session.")
-      readline(prompt = "After the restart, please run wflowsync::sync_setup() again. Press [ENTER] to acknowledge and restart... ")
+      cli::cli_alert_warning("Hint: After the restart, ensure RStudio actually opened the new project (check the project name in the top right corner).")
+      readline(prompt = "Then, please run wflowsync::sync_setup() again. Press [ENTER] to acknowledge and restart... ")
 
       workflowr::wflow_start(new_name, change_wd = TRUE)
       return(invisible(TRUE)) # Exit the function here so RStudio can restart
