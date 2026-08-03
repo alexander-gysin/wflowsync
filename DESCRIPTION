@@ -1,8 +1,8 @@
 Package: wflowsync
 Title: Streamlined Synchronization for Workflowr Projects
-Version: 0.1.0
+Version: 0.1.1
 Authors@R: 
-    person("Alexander", "Gysin", role = c("aut", "cre"))
+    person("Alexander", "Gysin", email = "258851030+alexander-gysin@users.noreply.github.com", role = c("aut", "cre"))
 Description: Provides an intuitive, context-aware command-line interface and an 
     interactive Shiny gadget to streamline Git version control, package management 
     (via renv), and website publishing (via workflowr). Designed to reduce friction 
