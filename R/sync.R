@@ -155,12 +155,15 @@ sync <- function(publish = FALSE, msg = NULL) {
 
   # D. Git Push
   cli::cli_alert_info("Pushing to GitHub...")
-  tryCatch({
-    gert::git_push(verbose = FALSE)
+
+  # Suppress warnings so we can format the error cleanly with cli if it fails
+  out <- suppressWarnings(system2("git", "push", stdout = TRUE, stderr = TRUE))
+
+  if (!is.null(attr(out, "status")) && attr(out, "status") != 0) {
+    cli::cli_alert_danger("Push failed:\n{paste(out, collapse='\n')}")
+  } else {
     cli::cli_alert_success("Push successful.")
-  }, error = function(e) {
-    cli::cli_alert_danger("Push failed: {e$message}")
-  })
+  }
 
   invisible(TRUE)
 }
