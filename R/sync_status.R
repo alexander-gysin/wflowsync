@@ -1,8 +1,8 @@
 #' Check Project Status and Sync
 #'
 #' Opens an interactive Shiny Gadget allowing users to select files to publish
-#' via Workflowr or commit/push via Git, while displaying PAT and renv status
-#' in a visual 3-column dashboard. Features a 2-step review process.
+#' via Workflowr or commit/push via Git. Automatically checks for unpulled changes
+#' and verifies final synchronization status. Features a 2-step review process.
 #'
 #' @export
 sync_status <- function() {
@@ -87,16 +87,22 @@ sync_status <- function() {
     }
   }
 
+  # Check uncommitted files (Local gert functions work perfectly, no network needed here)
   gs <- tryCatch(gert::git_status(), error = function(e) NULL)
   git_files_only <- character(0)
   if (!is.null(gs)) {
     git_files_only <- setdiff(gs$file, wflow_files)
   }
 
+  # Check Ahead / Behind
+  ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 0, behind = 0))
+  n_ahead <- if (!is.null(ab$ahead)) ab$ahead else 0
+  n_behind <- if (!is.null(ab$behind)) ab$behind else 0
+
   if (pat_state %in% c("missing", "expired")) {
     git_color <- col_red
     git_title <- "Git & GitHub: Error"
-  } else if (pat_state == "warning" || length(git_files_only) > 0) {
+  } else if (pat_state == "warning" || length(git_files_only) > 0 || n_behind > 0 || n_ahead > 0) {
     git_color <- col_yellow
     git_title <- "Git & GitHub: Action Needed"
   } else {
@@ -118,7 +124,6 @@ sync_status <- function() {
 
   # SHINY UI ------------------------------------------------
   ui <- miniUI::miniPage(
-    # Setting right = NULL removes the confusing "Done" button, leaving only "Cancel" on the left
     miniUI::gadgetTitleBar("wflowsync: Project Dashboard", right = NULL),
     miniUI::miniContentPanel(
       shiny::uiOutput("dynamic_ui")
@@ -132,15 +137,12 @@ sync_status <- function() {
   # SHINY SERVER ------------------------------------------------
   server <- function(input, output, session) {
 
-    # Track which screen the user is on (1 = Dashboard, 2 = Review)
     rv <- shiny::reactiveValues(step = 1)
 
-    # Render Main View or Review View
     output$dynamic_ui <- shiny::renderUI({
       if (rv$step == 1) {
         # --- STEP 1: DASHBOARD ---
         shiny::fluidRow(
-          # Column 1: Workflowr
           shiny::column(4, create_card(wf_title, wf_color,
                                        if (wf_state == "missing") {
                                          shiny::p(style = "color: #dc3545; font-weight: bold;", "Run workflowr::wflow_start() to configure.")
@@ -150,28 +152,39 @@ sync_status <- function() {
                                          shiny::tagList(
                                            shiny::p("The following files need to be knitted and published:"),
                                            shiny::checkboxGroupInput("wflow_cb", label = NULL, choices = wflow_files, selected = wflow_files),
-                                           shiny::textInput("wflow_msg", "Publish Message:", value = "Update analysis")
+                                           shiny::textInput("wflow_msg", "Publish Message:", placeholder = "Update analysis")
                                          )
                                        }
           )),
 
-          # Column 2: Git & GitHub
           shiny::column(4, create_card(git_title, git_color,
                                        shiny::tagList(
                                          shiny::tags$div(style = sprintf("font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #ddd; padding-bottom: 10px; color: %s;", pat_color), pat_text),
+
+                                         if (n_behind > 0) {
+                                           shiny::tagList(
+                                             shiny::p(style = "color: #dc3545; font-weight: bold;", sprintf("\U000026A0\U0000FE0F You are %d commits behind GitHub!", n_behind)),
+                                             shiny::checkboxInput("do_pull", shiny::tags$b("Pull latest changes before syncing"), value = TRUE),
+                                             shiny::hr()
+                                           )
+                                         },
+
+                                         if (n_ahead > 0) {
+                                           shiny::p(style = "color: #f39c12; font-weight: bold;", sprintf("\U00002191 %d local commits ready to push.", n_ahead))
+                                         },
+
                                          if (length(git_files_only) == 0) {
                                            shiny::p(style = "color: grey; text-align: center; margin-top: 10px;", "No other untracked or modified files.")
                                          } else {
                                            shiny::tagList(
-                                             shiny::p("Standard files to commit & push:"),
+                                             shiny::p("Standard files to commit:"),
                                              shiny::checkboxGroupInput("git_cb", label = NULL, choices = git_files_only, selected = git_files_only),
-                                             shiny::textInput("git_msg", "Commit Message:", value = "Update project files")
+                                             shiny::textInput("git_msg", "Commit Message:", placeholder = "Update project files")
                                            )
                                          }
                                        )
           )),
 
-          # Column 3: renv
           shiny::column(4, create_card(renv_title, renv_color,
                                        if (renv_state == "missing") {
                                          shiny::p(style = "color: #dc3545; font-weight: bold;", "Run renv::init() to set up package tracking.")
@@ -188,17 +201,10 @@ sync_status <- function() {
       } else {
         # --- STEP 2: REVIEW & CONFIRM ---
         shiny::fluidRow(
-          shiny::column(4, create_card("1. Snapshot Review", "#17a2b8",
-                                       if (isTRUE(input$do_snapshot)) {
-                                         shiny::p("\U00002705 Will run ", shiny::tags$code("renv::snapshot()"), " and commit the updated lockfile.")
-                                       } else {
-                                         shiny::p(style = "color: grey;", "No renv updates selected.")
-                                       }
-          )),
-          shiny::column(4, create_card("2. Publish Review", "#17a2b8",
+          shiny::column(4, create_card("1. Publish Review", "#17a2b8",
                                        if (length(input$wflow_cb) > 0) {
                                          shiny::tagList(
-                                           shiny::p(shiny::tags$b("Message: "), input$wflow_msg),
+                                           shiny::p(shiny::tags$b("Message: "), if (is.null(input$wflow_msg) || input$wflow_msg == "") "Update analysis" else input$wflow_msg),
                                            shiny::p(shiny::tags$b("Files to knit & publish:")),
                                            shiny::tags$ul(lapply(input$wflow_cb, shiny::tags$li))
                                          )
@@ -206,25 +212,37 @@ sync_status <- function() {
                                          shiny::p(style = "color: grey;", "No .Rmd files selected for publishing.")
                                        }
           )),
-          shiny::column(4, create_card("3. Commit Review", "#17a2b8",
-                                       if (length(input$git_cb) > 0 || isTRUE(input$do_snapshot)) {
+          shiny::column(4, create_card("2. Commit Review", "#17a2b8",
+                                       if (length(input$git_cb) > 0 || isTRUE(input$do_snapshot) || n_ahead > 0 || isTRUE(input$do_pull)) {
                                          shiny::tagList(
-                                           shiny::p(shiny::tags$b("Message: "), input$git_msg),
-                                           shiny::p(shiny::tags$b("Files to commit & push:")),
-                                           shiny::tags$ul(
-                                             if (isTRUE(input$do_snapshot)) shiny::tags$li(shiny::tags$b("renv.lock")),
-                                             lapply(input$git_cb, shiny::tags$li)
-                                           )
+                                           if (isTRUE(input$do_pull)) shiny::p(style = "color: #28a745; font-weight: bold;", "\U00002193 Will pull changes from GitHub first."),
+                                           if (n_ahead > 0) shiny::p(style = "color: #f39c12; font-weight: bold;", sprintf("\U00002191 Will push %d existing commits.", n_ahead)),
+                                           if (length(input$git_cb) > 0 || isTRUE(input$do_snapshot)) {
+                                             shiny::tagList(
+                                               shiny::p(shiny::tags$b("Message: "), if (is.null(input$git_msg) || input$git_msg == "") "Update project files" else input$git_msg),
+                                               shiny::p(shiny::tags$b("Files to commit:")),
+                                               shiny::tags$ul(
+                                                 if (isTRUE(input$do_snapshot)) shiny::tags$li(shiny::tags$b("renv.lock")),
+                                                 lapply(input$git_cb, shiny::tags$li)
+                                               )
+                                             )
+                                           }
                                          )
                                        } else {
                                          shiny::p(style = "color: grey;", "No standard files selected for commit.")
+                                       }
+          )),
+          shiny::column(4, create_card("3. Snapshot Review", "#17a2b8",
+                                       if (isTRUE(input$do_snapshot)) {
+                                         shiny::p("\U00002705 Will run ", shiny::tags$code("renv::snapshot()"), " and commit the updated lockfile.")
+                                       } else {
+                                         shiny::p(style = "color: grey;", "No renv updates selected.")
                                        }
           ))
         )
       }
     })
 
-    # Render Bottom Buttons
     output$dynamic_buttons <- shiny::renderUI({
       if (rv$step == 1) {
         shiny::actionButton("btn_review", "Review Sync", class = "btn-primary", style = "font-weight: bold; padding: 8px 20px;")
@@ -236,34 +254,51 @@ sync_status <- function() {
       }
     })
 
-    # Navigation logic
     shiny::observeEvent(input$btn_review, { rv$step <- 2 })
     shiny::observeEvent(input$btn_back, { rv$step <- 1 })
 
-    # Execute logic
     shiny::observeEvent(input$btn_execute, {
       shiny::stopApp(list(
         action = "execute",
+        do_pull = isTRUE(input$do_pull),
         do_snapshot = isTRUE(input$do_snapshot),
         wflow_files = input$wflow_cb,
         wflow_msg = input$wflow_msg,
         git_files = input$git_cb,
-        git_msg = input$git_msg
+        git_msg = input$git_msg,
+        n_ahead = n_ahead
       ))
     })
 
-    # Cancel handling
     shiny::observeEvent(input$cancel, {
       shiny::stopApp(NULL)
     })
   }
 
-  # Launch Gadget (Updated dimensions)
-  res <- shiny::runGadget(ui, server, viewer = shiny::dialogViewer("wflowsync", width = 1200, height = 750))
+  res <- shiny::runGadget(ui, server, viewer = shiny::dialogViewer("wflowsync Dashboard", width = 1200, height = 750))
 
   # EXECUTE SYNC ------------------------------------------------
   if (!is.null(res) && res$action == "execute") {
     cli::cli_h2("Executing Sync Operations...")
+
+    # PATCH: Force Git to use stored credentials instead of hanging on invisible prompts
+    Sys.setenv(GIT_TERMINAL_PROMPT = "0")
+
+    wflow_msg_final <- if (is.null(res$wflow_msg) || res$wflow_msg == "") "Update analysis" else res$wflow_msg
+    git_msg_final <- if (is.null(res$git_msg) || res$git_msg == "") "Update project files" else res$git_msg
+
+    # 0. PULL CHANGES (Native OS Call)
+    if (res$do_pull) {
+      cli::cli_alert_info("Pulling latest changes from GitHub...")
+      pull_out <- suppressWarnings(system2("git", args = "pull", stdout = TRUE, stderr = TRUE))
+      if (!is.null(attr(pull_out, "status")) && attr(pull_out, "status") != 0) {
+        cli::cli_alert_danger("Pull failed (likely a merge conflict):")
+        cli::cli_text(cli::col_grey(paste(pull_out, collapse = "\n")))
+        cli::cli_alert_warning("Sync aborted to protect your files. Please resolve the conflict manually in the terminal.")
+        return(invisible(res))
+      }
+      cli::cli_alert_success("Successfully pulled changes.")
+    }
 
     # 1. RENV SNAPSHOT
     if (res$do_snapshot) {
@@ -272,13 +307,8 @@ sync_status <- function() {
         renv::snapshot(prompt = FALSE)
         cli::cli_alert_success("renv.lock updated.")
 
-        # Automatically add renv.lock to the Git payload if not already present
         if (!("renv.lock" %in% res$git_files)) {
           res$git_files <- c(res$git_files, "renv.lock")
-        }
-        # Provide a fallback commit message if git_msg is empty/missing
-        if (is.null(res$git_msg) || res$git_msg == "") {
-          res$git_msg <- "Update renv.lock"
         }
       }, error = function(e) cli::cli_alert_danger("renv snapshot failed: {e$message}"))
     }
@@ -287,25 +317,44 @@ sync_status <- function() {
     if (length(res$wflow_files) > 0) {
       cli::cli_alert_info("Publishing via Workflowr...")
       tryCatch({
-        workflowr::wflow_publish(res$wflow_files, message = res$wflow_msg)
-        cli::cli_alert_success("Successfully built and pushed .Rmd files!")
+        workflowr::wflow_publish(res$wflow_files, message = wflow_msg_final)
+        cli::cli_alert_success("Successfully built and committed .Rmd files!")
       }, error = function(e) cli::cli_alert_danger("Workflowr publish failed: {e$message}"))
     }
 
-    # 3. GIT COMMIT & PUSH
+    # 3. GIT COMMIT (Standard Files - Local gert is fine here)
     if (length(res$git_files) > 0) {
-      cli::cli_alert_info("Staging, committing, and pushing standard files...")
+      cli::cli_alert_info("Staging and committing standard files...")
       tryCatch({
         gert::git_add(res$git_files)
-        gert::git_commit(message = res$git_msg)
-        gert::git_push()
-        cli::cli_alert_success("Successfully pushed standard files to GitHub!")
-      }, error = function(e) cli::cli_alert_danger("Git action failed: {e$message}"))
+        gert::git_commit(message = git_msg_final)
+        cli::cli_alert_success("Standard files committed.")
+      }, error = function(e) cli::cli_alert_danger("Git commit failed: {e$message}"))
     }
 
-    # Final state if nothing was selected
-    if (!res$do_snapshot && length(res$wflow_files) == 0 && length(res$git_files) == 0) {
+    # 4. GIT PUSH (Native OS Call - Pushes Everything!)
+    made_changes <- res$do_snapshot || length(res$wflow_files) > 0 || length(res$git_files) > 0
+    if (made_changes || res$n_ahead > 0) {
+      cli::cli_alert_info("Pushing all commits to GitHub...")
+      push_out <- suppressWarnings(system2("git", args = "push", stdout = TRUE, stderr = TRUE))
+
+      if (!is.null(attr(push_out, "status")) && attr(push_out, "status") != 0) {
+        cli::cli_alert_danger("Git push failed:")
+        cli::cli_text(cli::col_red(paste(push_out, collapse = "\n")))
+      } else {
+        cli::cli_alert_success("Successfully pushed to GitHub!")
+      }
+    } else if (!res$do_pull) {
       cli::cli_alert_info("No actions selected. Project remains unchanged.")
+    }
+
+    # 5. FINAL VERIFICATION
+    cli::cli_h3("Final Verification")
+    final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 0, behind = 0))
+    if (!is.null(final_ab) && final_ab$ahead == 0 && final_ab$behind == 0) {
+      cli::cli_alert_success("All changes pushed! Your local project is perfectly in sync with GitHub.")
+    } else {
+      cli::cli_alert_warning("Sync completed, but there may still be unpushed commits or remote changes.")
     }
 
   } else {

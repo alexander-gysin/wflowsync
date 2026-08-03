@@ -13,13 +13,9 @@
 #' @export
 sync_setup <- function(reset_credentials = FALSE) {
 
-  cli::cli_h1("Welcome to wflowsync Setup \U0001F680")
-  cli::cli_text("This wizard will configure your project for seamless, secure syncing.")
-  readline(prompt = "Press [ENTER] to begin...")
+  cli::cli_h1("Initializing wflowsync Setup")
 
-
-  # 1. TOOL CHECKS (Workflowr, Renv, Git) -------------------------------------
-
+  # 1. TOOL CHECKS ------------------------------------------------
   cli::cli_h2("1. Environment Checks")
 
   # --- Checkpoint 1: Workflowr ---
@@ -30,8 +26,8 @@ sync_setup <- function(reset_credentials = FALSE) {
     cli::cli_text("Workflowr builds the reproducible project structure (analysis/, data/, docs/) and initializes Git.")
     cli::cli_text("Press {.kbd Esc} to exit setup. Then run:")
     cli::cli_bullets(c(
-      "*" = "{.code workflowr::wflow_start(\"my_project_name\")} (to create a brand new directory), or.",
-      "*" = "{.code workflowr::wflow_start(\".\", existing = TRUE)} (if you are already inside your project folder)"
+      "*" = "{.code workflowr::wflow_start(\".\", existing = TRUE)} (if you are already inside your project folder), or",
+      "*" = "{.code workflowr::wflow_start(\"my_project_name\")} (to create a brand new directory)."
     ))
     cli::cli_text("Then restart {.code sync_setup()}.")
   }
@@ -74,11 +70,9 @@ sync_setup <- function(reset_credentials = FALSE) {
   }
   readline(prompt = "Press [ENTER] to proceed to GitHub Authentication...")
 
-  # 2. CREDENTIAL MANAGEMENT (Environment Aware) ------------------------------
-
+  # 2. CREDENTIAL MANAGEMENT ------------------------------------------------
   cli::cli_h2("2. GitHub Authentication")
 
-  # Handle Reset
   if (reset_credentials) {
     cli::cli_alert_danger("Resetting credentials...")
     if (file.exists("~/.git-credentials")) file.remove("~/.git-credentials")
@@ -86,14 +80,13 @@ sync_setup <- function(reset_credentials = FALSE) {
     tryCatch(gitcreds::gitcreds_delete(), error = function(e) invisible())
   }
 
-  # Check if credentials already exist
   if (!file.exists("~/.wflowsync_meta.rds")) {
 
     cli::cli_text("How are you accessing this R session?")
     env_choice <- utils::menu(
       choices = c(
-        "Personal Computer (Mac/Windows GUI) OR RStudio Server",
-        "Pure Terminal/CLI (Headless HPC Cluster, SSH without RStudio)"
+        "Personal Computer (Local Mac or Windows)",
+        "Remote Server/Cluster (SSH or RStudio Server in a web browser)"
       ),
       title = "Select your environment type:"
     )
@@ -103,7 +96,6 @@ sync_setup <- function(reset_credentials = FALSE) {
       stop("User cancelled setup.", call. = FALSE)
     }
 
-    # --- PAT Generation Walkthrough ---
     cli::cli_h3("Generating a GitHub Personal Access Token (PAT)")
     cli::cli_text("To push securely, you need a PAT.")
     cli::cli_ul(c(
@@ -116,7 +108,6 @@ sync_setup <- function(reset_credentials = FALSE) {
 
     readline(prompt = "Press [ENTER] once you have copied your PAT...")
 
-    # Expiration Metadata
     pat_days <- readline(prompt = "How many days until this PAT expires? (e.g. 60, 30): ")
     pat_days_num <- suppressWarnings(as.numeric(pat_days))
 
@@ -128,24 +119,21 @@ sync_setup <- function(reset_credentials = FALSE) {
 
     expiry_date <- as.character(Sys.Date() + pat_days_num)
 
-    # --- Route 1: Desktop/GUI (Encrypted OS Keychain) ---
     if (env_choice == 1) {
       cli::cli_alert_info("Configuring credentials using your native OS secure credential manager.")
       cli::cli_text("When prompted below, paste your PAT as the password.")
 
-      # Use gitcreds to securely store the token in Mac Keychain / Windows Credential Manager
       gitcreds::gitcreds_set()
 
-      # Save metadata for sync_status()
       meta <- list(type = "desktop", expiry = expiry_date)
       saveRDS(meta, file = "~/.wflowsync_meta.rds")
 
       cli::cli_alert_success("Credentials successfully encrypted via your OS manager!")
 
-      # --- Route 2: Headless Server (Isolated File Store) ---
     } else if (env_choice == 2) {
       cli::cli_alert_info("Configuring native Git credential storage for headless clusters.")
       cli::cli_text("Your token will be safely locked to your isolated Linux user profile.")
+      cli::cli_alert_warning("System Administrators and other users who have access to your login can read the username and PAT!")
 
       tryCatch({
         system("git config --global credential.helper store", ignore.stdout = TRUE, ignore.stderr = TRUE)
@@ -163,7 +151,6 @@ sync_setup <- function(reset_credentials = FALSE) {
       writeLines(cred_string, con = "~/.git-credentials")
       Sys.chmod("~/.git-credentials", mode = "0600")
 
-      # Save metadata
       meta <- list(username = gh_user, type = "headless", expiry = expiry_date)
       saveRDS(meta, file = "~/.wflowsync_meta.rds")
 
@@ -178,16 +165,6 @@ sync_setup <- function(reset_credentials = FALSE) {
     cli::cli_text("Your PAT expires on: {.emph {meta$expiry}}")
     cli::cli_text("To update your PAT, run {.code sync_setup(reset_credentials = TRUE)}")
   }
-
-
-  # 3. WRAP UP ----------------------------------------------------------------
-
-  cli::cli_h2("3. Setup Complete")
-  cli::cli_alert_success("Your environment is configured.")
-  cli::cli_ul(c(
-    "Use {.code sync_status()} to check your project state.",
-    "Use {.code sync()} to instantly commit and push changes."
-  ))
-
+  cli::cli_alert_success("wflowsync setup complete! You are ready to use sync_status().")
   invisible(TRUE)
 }
