@@ -3,6 +3,29 @@
 #' Interactive wizard that sets up workflowr, initializes renv, and configures
 #' GitHub credentials. Safely handles R session restarts.
 #'
+#' @description
+#' `sync_setup()` is designed to be run at the beginning of your workflow and is
+#' completely safe to run multiple times. It operates as a state-aware checklist
+#' covering three main steps:
+#'
+#' **1. Workflowr Configuration:** The function checks if the current working directory
+#' is a valid workflowr project. If not, it asks if you want to create a brand new
+#' project (either in the current folder or a new one). If you choose not to create
+#' a new project, it pauses and prompts you to open your existing project folder first.
+#'
+#' **2. Package Tracking (renv):** It checks for an active `renv.lock` file. If
+#' missing, it offers to initialize `renv` to ensure computational reproducibility.
+#'
+#' **3. GitHub Authentication:** It verifies if a valid GitHub Personal Access
+#' Token (PAT) is available via the `gitcreds` package. If not, it provides
+#' step-by-step instructions to generate and safely store one.
+#'
+#' **Note on Restarts:** Creating a new project directory or initializing `renv`
+#' may automatically restart your R session. This is normal RStudio behavior. The
+#' wizard provides acknowledgment prompts before triggering these restarts. Once R
+#' restarts, simply run `wflowsync::sync_setup()` again—it will remember your
+#' progress, skip the completed steps, and pick up exactly where it left off.
+#'
 #' @export
 sync_setup <- function() {
 
@@ -17,9 +40,9 @@ sync_setup <- function() {
 
   cli::cli_h1("wflowsync Setup Wizard")
 
-
-  # STEP 1: WORKFLOWR -------------------------------------------------------
-
+  # =========================================================================
+  # STEP 1: WORKFLOWR
+  # =========================================================================
   cli::cli_h2("1. Workflowr Configuration")
 
   has_wflow <- file.exists("_workflowr.yml") || file.exists("analysis/_site.yml")
@@ -29,17 +52,18 @@ sync_setup <- function() {
   } else {
     cli::cli_alert_warning("No workflowr project detected in the current directory.")
 
-    # The New Prompt
-    already_created <- ask_yn("Have you already created a workflowr project in which you would like to use wflowsync?")
+    # The Streamlined Prompt
+    create_new <- ask_yn("Do you want to create a brand new workflowr project with wflowsync?")
 
-    if (already_created) {
+    if (!create_new) {
       cli::cli_abort(c(
         "x" = "Setup paused.",
-        "i" = "Please open that existing project in RStudio (File -> Open Project...), then run {.code wflowsync::sync_setup()} again."
+        "i" = "It looks like you want to use an existing project.",
+        "i" = "Please open that project in RStudio (File -> Open Project...), then run {.code wflowsync::sync_setup()} again."
       ))
     }
 
-    in_folder <- ask_yn("Are you currently inside the empty folder you want to turn into a workflowr project?")
+    in_folder <- ask_yn("Are you currently inside the empty folder you want to turn into the project?")
 
     if (in_folder) {
       readline(prompt = "Press [ENTER] to initialize workflowr here...")
@@ -58,9 +82,9 @@ sync_setup <- function() {
     }
   }
 
-
-  # STEP 2: RENV ------------------------------------------------------------
-
+  # =========================================================================
+  # STEP 2: RENV
+  # =========================================================================
   cli::cli_h2("2. Package Tracking (renv)")
 
   if (!file.exists("renv.lock")) {
@@ -82,9 +106,9 @@ sync_setup <- function() {
     cli::cli_alert_success("renv is already initialized.")
   }
 
-
-  # STEP 3: GITHUB PAT ------------------------------------------------------
-
+  # =========================================================================
+  # STEP 3: GITHUB PAT
+  # =========================================================================
   cli::cli_h2("3. GitHub Authentication")
 
   has_pat <- FALSE
