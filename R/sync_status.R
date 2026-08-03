@@ -275,47 +275,77 @@ sync_status <- function() {
     })
   }
 
-  res <- shiny::runGadget(ui, server, viewer = shiny::dialogViewer("wflowsync Dashboard", width = 1200, height = 750))
+  # Use paneViewer instead to ensure it isn't blocked by a popup blocker
+  res <- shiny::runGadget(ui, server, viewer = shiny::paneViewer())
 
-  # EXECUTE SYNC (LOUD DIAGNOSTIC MODE) --------------------------------
+  # See exactly what Shiny hands back to the script when it closes
+  message("\n--- DEBUG: Gadget closed ---")
+  str(res)
+
+  # EXECUTE SYNC ------------------------------------------------
   if (!is.null(res) && res$action == "execute") {
-    cli::cli_h2("Diagnostic Execution Log:")
 
-    message("1. Initializing environment..."); flush.console()
+    # 1. Give RStudio Server time to fully close the Gadget and restore standard output
+    Sys.sleep(1)
+    message("\n--- Executing Sync Operations ---")
     Sys.setenv(GIT_TERMINAL_PROMPT = "0")
-    git_msg_final <- if (is.null(res$git_msg) || res$git_msg == "") "Update project files" else res$git_msg
 
+    # 0. PULL
+    if (res$do_pull) {
+      message("Pulling...")
+      tryCatch(gert::git_pull(), error = function(e) message("Pull failed: ", e$message))
+    }
+
+    # 1. RENV
+    if (res$do_snapshot) {
+      message("Running renv::snapshot...")
+      renv::snapshot(prompt = FALSE)
+      if (!("renv.lock" %in% res$git_files)) res$git_files <- c(res$git_files, "renv.lock")
+    }
+
+    # 2. WORKFLOWR
+    if (length(res$wflow_files) > 0) {
+      message("Publishing workflowr files...")
+      wf_msg <- if (!is.null(res$wflow_msg) && res$wflow_msg != "") res$wflow_msg else "Update analysis"
+      workflowr::wflow_publish(res$wflow_files, message = wf_msg)
+    }
+
+    # 3. NATIVE GIT ADD & COMMIT
     if (length(res$git_files) > 0) {
-      message(sprintf("2. Preparing to commit %d files...", length(res$git_files))); flush.console()
+      message(sprintf("Staging %d files...", length(res$git_files)))
 
-      message("   -> Running git_add()..."); flush.console()
-      gert::git_add(res$git_files)
-
-      message("   -> Running git_commit()..."); flush.console()
       tryCatch({
-        gert::git_commit(message = git_msg_final)
-        message("   -> Commit successful."); flush.console()
+        gert::git_add(res$git_files)
+        message("Files successfully staged.")
       }, error = function(e) {
-        message(sprintf("   -> COMMIT ERROR: %s", e$message)); flush.console()
+        message("CRITICAL ERROR during staging: ", e$message)
+      })
+
+      message("Committing...")
+      c_msg <- if (!is.null(res$git_msg) && res$git_msg != "") res$git_msg else "Update project files"
+
+      tryCatch({
+        gert::git_commit(c_msg)
+        message("Commit successful.")
+      }, error = function(e) {
+        message("CRITICAL ERROR during commit: ", e$message)
       })
     }
 
-    made_changes <- res$do_snapshot || length(res$wflow_files) > 0 || length(res$git_files) > 0
-    if (made_changes || res$n_ahead > 0) {
-      message("3. Preparing to Native Push..."); flush.console()
+    # 4. NATIVE GIT PUSH
+    message("Pushing...")
+    tryCatch({
+      gert::git_push()
+      message("Push successful.")
+    }, error = function(e) {
+      message("Push failed: ", e$message)
+    })
 
-      message("   -> Calling system2('git', 'push')..."); flush.console()
-      # By removing stdout=TRUE, we force Git to bleed any raw errors or
-      # hidden password prompts directly into the console in real-time.
-      exit_code <- system2("git", args = "push", stdout = "", stderr = "")
-
-      message(sprintf("   -> Push finished with exit code: %s", exit_code)); flush.console()
+    # 5. FINAL VERIFICATION
+    final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 1, behind = 1))
+    if (final_ab$ahead == 0 && final_ab$behind == 0) {
+      message("SUCCESS: Project perfectly synced!")
     }
-
-    message("4. Execution block finished."); flush.console()
-  } else {
-    cli::cli_alert_info("Sync cancelled by user. No changes made.")
   }
-
-  invisible(res)
 }
+"%||%" <- function(a, b) if (!is.null(a) && a != "") a else b
