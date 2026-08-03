@@ -10,8 +10,8 @@
 #'
 #' **1. Workflowr Configuration:** The function checks if the current working directory
 #' is a valid workflowr project. If not, it asks if you want to create a brand new
-#' project (either in the current folder or a new one). If you choose not to create
-#' a new project, it pauses and prompts you to open your existing project folder first.
+#' project. If you choose not to, it pauses and prompts you to open your existing
+#' project folder first.
 #'
 #' **2. Package Tracking (renv):** It checks for an active `renv.lock` file. If
 #' missing, it offers to initialize `renv` to ensure computational reproducibility.
@@ -63,16 +63,15 @@ sync_setup <- function() {
       ))
     }
 
-    in_folder <- ask_yn("Are you currently inside the empty folder you want to turn into the project?")
+    # Directly ask for the name, giving the option to use the current directory
+    new_name <- readline(prompt = "Enter a name for your new project folder (or type '.' to use current directory): ")
+    if (trimws(new_name) == "") cli::cli_abort("Invalid name. Setup aborted.")
 
-    if (in_folder) {
+    if (trimws(new_name) == ".") {
       readline(prompt = "Press [ENTER] to initialize workflowr here...")
       workflowr::wflow_start(".", existing = TRUE)
       cli::cli_alert_success("Workflowr initialized!")
     } else {
-      new_name <- readline(prompt = "Enter a name for your new project folder: ")
-      if (trimws(new_name) == "") cli::cli_abort("Invalid name. Setup aborted.")
-
       cli::cli_alert_info("RStudio will now create and switch to the new project: {.file {new_name}}")
       cli::cli_alert_danger("IMPORTANT: This will restart your R session.")
       readline(prompt = "After the restart, please run wflowsync::sync_setup() again. Press [ENTER] to acknowledge and restart... ")

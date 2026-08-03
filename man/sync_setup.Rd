@@ -2,21 +2,34 @@
 % Please edit documentation in R/sync_setup.R
 \name{sync_setup}
 \alias{sync_setup}
-\title{Initialize and Configure the wflowsync Environment}
+\title{Configure wflowsync}
 \usage{
-sync_setup(reset_credentials = FALSE)
-}
-\arguments{
-\item{reset_credentials}{Logical. Set to \code{TRUE} to overwrite existing
-Git credentials and prompt for a new GitHub Personal Access Token (PAT).
-Default is \code{FALSE}.}
-}
-\value{
-Invisible \code{TRUE} upon successful completion.
+sync_setup()
 }
 \description{
-Guides the user through setting up a reproducible data analysis environment
-on a headless Linux cluster. It sequentially verifies the presence of
-Workflowr, renv, and a linked GitHub repository, and then securely configures
-native Git credential storage for automated syncing.
+\code{sync_setup()} is designed to be run at the beginning of your workflow and is
+completely safe to run multiple times. It operates as a state-aware checklist
+covering three main steps:
+
+\strong{1. Workflowr Configuration:} The function checks if the current working directory
+is a valid workflowr project. If not, it asks if you want to create a brand new
+project. If you choose not to, it pauses and prompts you to open your existing
+project folder first.
+
+\strong{2. Package Tracking (renv):} It checks for an active \code{renv.lock} file. If
+missing, it offers to initialize \code{renv} to ensure computational reproducibility.
+
+\strong{3. GitHub Authentication:} It verifies if a valid GitHub Personal Access
+Token (PAT) is available via the \code{gitcreds} package. If not, it provides
+step-by-step instructions to generate and safely store one.
+
+\strong{Note on Restarts:} Creating a new project directory or initializing \code{renv}
+may automatically restart your R session. This is normal RStudio behavior. The
+wizard provides acknowledgment prompts before triggering these restarts. Once R
+restarts, simply run \code{wflowsync::sync_setup()} again—it will remember your
+progress, skip the completed steps, and pick up exactly where it left off.
+}
+\details{
+Interactive wizard that sets up workflowr, initializes renv, and configures
+GitHub credentials. Safely handles R session restarts.
 }
