@@ -304,10 +304,13 @@ sync_status <- function() {
     # 0. PULL
     if (res$do_pull) {
       cli::cli_alert_info("Pulling latest changes...")
-      tryCatch({
-        gert::git_pull(verbose = FALSE)
+      out <- system2("git", "pull", stdout = TRUE, stderr = TRUE)
+
+      if (!is.null(attr(out, "status")) && attr(out, "status") != 0) {
+        cli::cli_alert_danger("Pull failed:\n{paste(out, collapse='\n')}")
+      } else {
         cli::cli_alert_success("Pull complete.")
-      }, error = function(e) cli::cli_alert_danger("Pull failed: {e$message}"))
+      }
     }
 
     # 1. RENV
@@ -343,10 +346,13 @@ sync_status <- function() {
 
     # 4. NATIVE GIT PUSH
     cli::cli_alert_info("Pushing to GitHub...")
-    tryCatch({
-      gert::git_push(verbose = FALSE)
+    out <- system2("git", "push", stdout = TRUE, stderr = TRUE)
+
+    if (!is.null(attr(out, "status")) && attr(out, "status") != 0) {
+      cli::cli_alert_danger("Push failed:\n{paste(out, collapse='\n')}")
+    } else {
       cli::cli_alert_success("Push successful.")
-    }, error = function(e) cli::cli_alert_danger("Push failed: {e$message}"))
+    }
 
     # 5. FINAL VERIFICATION
     final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 1, behind = 1))
