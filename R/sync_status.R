@@ -275,17 +275,13 @@ sync_status <- function() {
     })
   }
 
-  # Use paneViewer instead to ensure it isn't blocked by a popup blocker
-  res <- shiny::runGadget(ui, server, viewer = shiny::paneViewer())
-
-  # See exactly what Shiny hands back to the script when it closes
-  message("\n--- DEBUG: Gadget closed ---")
-  str(res)
+  # Run the gadget in the Viewer pane (bulletproof on RStudio Server)
+  res <- shiny::runGadget(ui, server, viewer = shiny::paneViewer(minHeight = 600))
 
   # EXECUTE SYNC ------------------------------------------------
   if (!is.null(res) && res$action == "execute") {
 
-    # 1. Give RStudio Server time to fully close the Gadget and restore standard output
+    # 1. Give RStudio Server time to fully close the Gadget
     Sys.sleep(1)
     message("\n--- Executing Sync Operations ---")
     Sys.setenv(GIT_TERMINAL_PROMPT = "0")
@@ -317,9 +313,7 @@ sync_status <- function() {
       tryCatch({
         gert::git_add(res$git_files)
         message("Files successfully staged.")
-      }, error = function(e) {
-        message("CRITICAL ERROR during staging: ", e$message)
-      })
+      }, error = function(e) message("CRITICAL ERROR during staging: ", e$message))
 
       message("Committing...")
       c_msg <- if (!is.null(res$git_msg) && res$git_msg != "") res$git_msg else "Update project files"
@@ -327,9 +321,7 @@ sync_status <- function() {
       tryCatch({
         gert::git_commit(c_msg)
         message("Commit successful.")
-      }, error = function(e) {
-        message("CRITICAL ERROR during commit: ", e$message)
-      })
+      }, error = function(e) message("CRITICAL ERROR during commit: ", e$message))
     }
 
     # 4. NATIVE GIT PUSH
@@ -337,9 +329,7 @@ sync_status <- function() {
     tryCatch({
       gert::git_push()
       message("Push successful.")
-    }, error = function(e) {
-      message("Push failed: ", e$message)
-    })
+    }, error = function(e) message("Push failed: ", e$message))
 
     # 5. FINAL VERIFICATION
     final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 1, behind = 1))
