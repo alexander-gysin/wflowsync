@@ -15,6 +15,8 @@
 #'
 #' **2. Package Tracking (renv):** It checks for an active `renv.lock` file. If
 #' missing, it offers to initialize `renv` to ensure computational reproducibility.
+#' It safely injects a temporary dependency script so `renv` automatically carries
+#' `wflowsync` into your new isolated environment.
 #'
 #' **3. GitHub Authentication:** It verifies if a valid GitHub Personal Access
 #' Token (PAT) is available via the `gitcreds` package. If not, it provides
@@ -52,7 +54,6 @@ sync_setup <- function() {
   } else {
     cli::cli_alert_warning("No workflowr project detected in the current directory.")
 
-    # The Streamlined Prompt
     create_new <- ask_yn("Do you want to create a brand new workflowr project with wflowsync?")
 
     if (!create_new) {
@@ -63,7 +64,6 @@ sync_setup <- function() {
       ))
     }
 
-    # Directly ask for the name, giving the option to use the current directory
     new_name <- readline(prompt = "Enter a name for your new project folder (or type '.' to use current directory): ")
     if (trimws(new_name) == "") cli::cli_abort("Invalid name. Setup aborted.")
 
@@ -72,13 +72,20 @@ sync_setup <- function() {
       workflowr::wflow_start(".", existing = TRUE)
       cli::cli_alert_success("Workflowr initialized!")
     } else {
-      cli::cli_alert_info("RStudio will now create and attempt to switch to the new project: {.file {new_name}}")
-      cli::cli_alert_danger("IMPORTANT: This will restart your R session.")
-      cli::cli_alert_warning("Hint: After the restart, ensure RStudio actually opened the new project (check the project name in the top right corner).")
-      readline(prompt = "Then, please run wflowsync::sync_setup() again. Press [ENTER] to acknowledge and restart... ")
+      # Build the project in the background without trying to switch the R directory yet
+      workflowr::wflow_start(new_name, change_wd = FALSE)
 
-      workflowr::wflow_start(new_name, change_wd = TRUE)
-      return(invisible(TRUE)) # Exit the function here so RStudio can restart
+      cli::cli_alert_info("RStudio will now force-switch to your new project: {.file {new_name}}")
+      cli::cli_alert_danger("IMPORTANT: This will restart your R session.")
+      readline(prompt = "After the restart, please run wflowsync::sync_setup() again. Press [ENTER] to switch... ")
+
+      # Use the robust RStudio API to natively open the .Rproj file
+      if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+        rstudioapi::openProject(new_name)
+      } else {
+        cli::cli_alert_warning("rstudioapi is unavailable. Please open the new folder manually.")
+      }
+      return(invisible(TRUE))
     }
   }
 
@@ -87,18 +94,26 @@ sync_setup <- function() {
   # =========================================================================
   cli::cli_h2("2. Package Tracking (renv)")
 
+  # Clean up the dummy script from a previous run if it exists
+  if (file.exists("_wflowsync_deps.R")) unlink("_wflowsync_deps.R")
+
   if (!file.exists("renv.lock")) {
     cli::cli_alert_warning("renv is not tracking packages in this project.")
     do_renv <- ask_yn("Would you like to initialize renv now?")
 
     if (do_renv) {
       cli::cli_alert_warning("IMPORTANT: Initializing renv may restart your R session.")
+
+      # Inject the dummy script so renv's scanner finds wflowsync and installs it
+      writeLines("library(wflowsync)", "_wflowsync_deps.R")
+
       readline(prompt = "If it restarts, just run wflowsync::sync_setup() again to finish Step 3. Press [ENTER] to continue... ")
 
       renv::init()
 
-      # If renv restarts the session, the function ends here automatically.
-      # If it doesn't restart, we just continue to Step 3.
+      # If the session didn't restart, clean up immediately
+      if (file.exists("_wflowsync_deps.R")) unlink("_wflowsync_deps.R")
+
     } else {
       cli::cli_alert_info("Skipping renv setup.")
     }
@@ -120,7 +135,6 @@ sync_setup <- function() {
   if (has_pat) {
     cli::cli_alert_success("GitHub PAT is already configured on this machine.")
 
-    # Optionally update the expiry metadata file so our UI knows it's active
     days_valid <- readline(prompt = "How many days is this PAT valid for? (Press ENTER to default to 30): ")
     days_valid <- if (trimws(days_valid) == "") 30 else as.numeric(days_valid)
     if (is.na(days_valid)) days_valid <- 30
