@@ -1,170 +1,119 @@
-#' Initialize and Configure the wflowsync Environment
+#' Configure wflowsync
 #'
-#' Guides the user through setting up a reproducible data analysis environment
-#' on a headless Linux cluster. It sequentially verifies the presence of
-#' Workflowr, renv, and a linked GitHub repository, and then securely configures
-#' native Git credential storage for automated syncing.
+#' Interactive wizard that sets up workflowr, initializes renv, and configures
+#' GitHub credentials. Safely handles R session restarts.
 #'
-#' @param reset_credentials Logical. Set to \code{TRUE} to overwrite existing
-#'   Git credentials and prompt for a new GitHub Personal Access Token (PAT).
-#'   Default is \code{FALSE}.
-#'
-#' @return Invisible \code{TRUE} upon successful completion.
 #' @export
-sync_setup <- function(reset_credentials = FALSE) {
+sync_setup <- function() {
 
-  cli::cli_h1("Initializing wflowsync Setup")
+  if (!requireNamespace("cli", quietly = TRUE)) stop("The 'cli' package is required.")
 
-  # 1. TOOL CHECKS ------------------------------------------------
-  cli::cli_h2("1. Environment Checks")
-
-  # --- Checkpoint 1: Workflowr ---
-  if (file.exists("_workflowr.yml") || file.exists("analysis/_site.yml")) {
-    cli::cli_alert_success("Workflowr is initialized.")
-  } else {
-    cli::cli_alert_warning("Workflowr config missing.")
-    cli::cli_text("Workflowr builds the reproducible project structure (analysis/, data/, docs/) and initializes Git.")
-    cli::cli_text("Press {.kbd Esc} to exit setup. Then run:")
-    cli::cli_bullets(c(
-      "*" = "{.code workflowr::wflow_start(\".\", existing = TRUE)} (if you are already inside your project folder), or",
-      "*" = "{.code workflowr::wflow_start(\"my_project_name\")} (to create a brand new directory)."
-    ))
-    cli::cli_text("Then restart {.code sync_setup()}.")
+  # Helper function for Yes/No prompts
+  ask_yn <- function(prompt_text) {
+    if (!interactive()) return(FALSE)
+    ans <- tolower(trimws(readline(prompt = paste(prompt_text, "(y/n): "))))
+    return(ans %in% c("y", "yes"))
   }
-  readline(prompt = "Press [ENTER] to continue to the renv check...")
 
-  # --- Checkpoint 2: renv ---
-  if (file.exists("renv.lock")) {
-    cli::cli_alert_success("renv is initialized.")
+  cli::cli_h1("wflowsync Setup Wizard")
+
+
+  # STEP 1: WORKFLOWR -------------------------------------------------------
+
+  cli::cli_h2("1. Workflowr Configuration")
+
+  has_wflow <- file.exists("_workflowr.yml") || file.exists("analysis/_site.yml")
+
+  if (has_wflow) {
+    cli::cli_alert_success("Workflowr is already configured in this directory.")
   } else {
-    cli::cli_alert_warning("renv is not initialized.")
-    cli::cli_text("{.pkg renv} isolates your R packages and creates a {.file renv.lock} file to guarantee code reproducibility across different computers (like your cluster).")
-    cli::cli_text("Press {.kbd Esc} to exit setup. Then run:")
-    cli::cli_bullets(c(
-      "*" = "{.code renv::init()} to scan your code, build the local library, and generate the lockfile."
-    ))
-    cli::cli_text("Then restart {.code sync_setup()}.")
-  }
-  readline(prompt = "Press [ENTER] to continue to the Git & GitHub check...")
+    cli::cli_alert_warning("No workflowr project detected in the current directory.")
 
-  # --- Checkpoint 3: Git & GitHub ---
-  is_git <- tryCatch(length(gert::git_info()) > 0, error = function(e) FALSE)
+    # The New Prompt
+    already_created <- ask_yn("Have you already created a workflowr project in which you would like to use wflowsync?")
 
-  if (is_git) {
-    remotes <- tryCatch(gert::git_remote_list()$name, error = function(e) character(0))
-    if ("origin" %in% remotes) {
-      cli::cli_alert_success("Git is initialized and linked to a remote origin.")
-      cli::cli_text(cli::col_grey("Note: If you just initialized renv, your first sync() will automatically commit the lockfile for you!"))
-    } else {
-      cli::cli_alert_warning("Git is initialized, but no remote GitHub repository is linked.")
-      cli::cli_text("Your project needs a cloud destination (origin) to sync your files safely.")
-      cli::cli_text("Press {.kbd Esc} to exit setup. Then run:")
-      cli::cli_bullets(c(
-        "*" = "{.code workflowr::wflow_use_github(\"your_github_username\")} to automatically create the repo on GitHub and link it to this folder."
+    if (already_created) {
+      cli::cli_abort(c(
+        "x" = "Setup paused.",
+        "i" = "Please open that existing project in RStudio (File -> Open Project...), then run {.code wflowsync::sync_setup()} again."
       ))
-      cli::cli_text("Then restart {.code sync_setup()}.")
+    }
+
+    in_folder <- ask_yn("Are you currently inside the empty folder you want to turn into a workflowr project?")
+
+    if (in_folder) {
+      readline(prompt = "Press [ENTER] to initialize workflowr here...")
+      workflowr::wflow_start(".", existing = TRUE)
+      cli::cli_alert_success("Workflowr initialized!")
+    } else {
+      new_name <- readline(prompt = "Enter a name for your new project folder: ")
+      if (trimws(new_name) == "") cli::cli_abort("Invalid name. Setup aborted.")
+
+      cli::cli_alert_info("RStudio will now create and switch to the new project: {.file {new_name}}")
+      cli::cli_alert_danger("IMPORTANT: This will restart your R session.")
+      readline(prompt = "After the restart, please run wflowsync::sync_setup() again. Press [ENTER] to acknowledge and restart... ")
+
+      workflowr::wflow_start(new_name, change_wd = TRUE)
+      return(invisible(TRUE)) # Exit the function here so RStudio can restart
+    }
+  }
+
+
+  # STEP 2: RENV ------------------------------------------------------------
+
+  cli::cli_h2("2. Package Tracking (renv)")
+
+  if (!file.exists("renv.lock")) {
+    cli::cli_alert_warning("renv is not tracking packages in this project.")
+    do_renv <- ask_yn("Would you like to initialize renv now?")
+
+    if (do_renv) {
+      cli::cli_alert_warning("IMPORTANT: Initializing renv may restart your R session.")
+      readline(prompt = "If it restarts, just run wflowsync::sync_setup() again to finish Step 3. Press [ENTER] to continue... ")
+
+      renv::init()
+
+      # If renv restarts the session, the function ends here automatically.
+      # If it doesn't restart, we just continue to Step 3.
+    } else {
+      cli::cli_alert_info("Skipping renv setup.")
     }
   } else {
-    cli::cli_alert_warning("Git is not initialized in this directory.")
-    cli::cli_text("Press {.kbd Esc} to exit setup. Running {.code workflowr::wflow_start()} (from Checkpoint 1) resolves this.")
-  }
-  readline(prompt = "Press [ENTER] to proceed to GitHub Authentication...")
-
-  # 2. CREDENTIAL MANAGEMENT ------------------------------------------------
-  cli::cli_h2("2. GitHub Authentication")
-
-  if (reset_credentials) {
-    cli::cli_alert_danger("Resetting credentials...")
-    if (file.exists("~/.git-credentials")) file.remove("~/.git-credentials")
-    if (file.exists("~/.wflowsync_meta.rds")) file.remove("~/.wflowsync_meta.rds")
-    tryCatch(gitcreds::gitcreds_delete(), error = function(e) invisible())
+    cli::cli_alert_success("renv is already initialized.")
   }
 
-  if (!file.exists("~/.wflowsync_meta.rds")) {
 
-    cli::cli_text("How are you accessing this R session?")
-    env_choice <- utils::menu(
-      choices = c(
-        "Personal Computer (Local Mac or Windows)",
-        "Remote Server/Cluster (SSH or RStudio Server in a web browser)"
-      ),
-      title = "Select your environment type:"
-    )
+  # STEP 3: GITHUB PAT ------------------------------------------------------
 
-    if (env_choice == 0) {
-      cli::cli_alert_danger("Setup aborted.")
-      stop("User cancelled setup.", call. = FALSE)
-    }
+  cli::cli_h2("3. GitHub Authentication")
 
-    cli::cli_h3("Generating a GitHub Personal Access Token (PAT)")
-    cli::cli_text("To push securely, you need a PAT.")
-    cli::cli_ul(c(
-      "Go to: {.url https://github.com/settings/tokens/new}",
-      "Note: You can run {.code usethis::create_github_token()} in a new console to open the exact page.",
-      "Set an expiration date (e.g., 60 days).",
-      "Check the {.strong 'repo'} scope box (this is all we need).",
-      "Click 'Generate token' at the bottom."
-    ))
+  has_pat <- FALSE
+  if (requireNamespace("gitcreds", quietly = TRUE)) {
+    cred <- tryCatch(gitcreds::gitcreds_get(), error = function(e) NULL)
+    if (!is.null(cred)) has_pat <- TRUE
+  }
 
-    readline(prompt = "Press [ENTER] once you have copied your PAT...")
+  if (has_pat) {
+    cli::cli_alert_success("GitHub PAT is already configured on this machine.")
 
-    pat_days <- readline(prompt = "How many days until this PAT expires? (e.g. 60, 30): ")
-    pat_days_num <- suppressWarnings(as.numeric(pat_days))
+    # Optionally update the expiry metadata file so our UI knows it's active
+    days_valid <- readline(prompt = "How many days is this PAT valid for? (Press ENTER to default to 30): ")
+    days_valid <- if (trimws(days_valid) == "") 30 else as.numeric(days_valid)
+    if (is.na(days_valid)) days_valid <- 30
 
-    while (is.na(pat_days_num) || pat_days_num <= 0) {
-      cli::cli_alert_danger("Invalid input. Please enter a valid positive number.")
-      pat_days <- readline(prompt = "How many days until this PAT expires? (e.g. 90, 30): ")
-      pat_days_num <- suppressWarnings(as.numeric(pat_days))
-    }
-
-    expiry_date <- as.character(Sys.Date() + pat_days_num)
-
-    if (env_choice == 1) {
-      cli::cli_alert_info("Configuring credentials using your native OS secure credential manager.")
-      cli::cli_text("When prompted below, paste your PAT as the password.")
-
-      gitcreds::gitcreds_set()
-
-      meta <- list(type = "desktop", expiry = expiry_date)
-      saveRDS(meta, file = "~/.wflowsync_meta.rds")
-
-      cli::cli_alert_success("Credentials successfully encrypted via your OS manager!")
-
-    } else if (env_choice == 2) {
-      cli::cli_alert_info("Configuring native Git credential storage for headless clusters.")
-      cli::cli_text("Your token will be safely locked to your isolated Linux user profile.")
-      cli::cli_alert_warning("System Administrators and other users who have access to your login can read the username and PAT!")
-
-      tryCatch({
-        system("git config --global credential.helper store", ignore.stdout = TRUE, ignore.stderr = TRUE)
-      }, error = function(e) invisible())
-
-      gh_user <- readline(prompt = "Enter your GitHub Username: ")
-
-      if (rstudioapi::isAvailable()) {
-        gh_pat <- rstudioapi::askForPassword("Paste your GitHub PAT:")
-      } else {
-        gh_pat <- readline(prompt = "Paste your GitHub PAT (text will be visible): ")
-      }
-
-      cred_string <- sprintf("https://%s:%s@github.com", gh_user, gh_pat)
-      writeLines(cred_string, con = "~/.git-credentials")
-      Sys.chmod("~/.git-credentials", mode = "0600")
-
-      meta <- list(username = gh_user, type = "headless", expiry = expiry_date)
-      saveRDS(meta, file = "~/.wflowsync_meta.rds")
-
-      cli::cli_alert_success("Credentials successfully saved and locked to your user profile!")
-    }
-
-    cli::cli_alert_info("Your PAT expires on: {.emph {expiry_date}}")
+    meta <- list(expiry = Sys.Date() + days_valid)
+    saveRDS(meta, "~/.wflowsync_meta.rds")
 
   } else {
-    meta <- tryCatch(readRDS("~/.wflowsync_meta.rds"), error = function(e) list(expiry = "Unknown"))
-    cli::cli_alert_success("Git credentials already configured.")
-    cli::cli_text("Your PAT expires on: {.emph {meta$expiry}}")
-    cli::cli_text("To update your PAT, run {.code sync_setup(reset_credentials = TRUE)}")
+    cli::cli_alert_warning("No GitHub Personal Access Token (PAT) found.")
+    cli::cli_text("You need a PAT to push your analysis to GitHub.")
+    cli::cli_text("1. Run {.code usethis::create_github_token()} in your console to generate one.")
+    cli::cli_text("2. Copy the token.")
+    cli::cli_text("3. Run {.code gitcreds::gitcreds_set()} and paste the token.")
+    cli::cli_text("4. Run {.code wflowsync::sync_setup()} one last time to save the expiry date.")
   }
-  cli::cli_alert_success("wflowsync setup complete! You are ready to use sync_status().")
+
+  cli::cli_text("")
+  cli::cli_alert_success("Setup check complete!")
   invisible(TRUE)
 }
