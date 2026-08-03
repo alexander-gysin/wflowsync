@@ -277,86 +277,42 @@ sync_status <- function() {
 
   res <- shiny::runGadget(ui, server, viewer = shiny::dialogViewer("wflowsync Dashboard", width = 1200, height = 750))
 
-  # EXECUTE SYNC ------------------------------------------------
+  # EXECUTE SYNC (LOUD DIAGNOSTIC MODE) --------------------------------
   if (!is.null(res) && res$action == "execute") {
-    cli::cli_h2("Executing Sync Operations...")
+    cli::cli_h2("Diagnostic Execution Log:")
 
-    # PATCH: Force Git to use stored credentials instead of hanging on invisible prompts
+    message("1. Initializing environment..."); flush.console()
     Sys.setenv(GIT_TERMINAL_PROMPT = "0")
-
-    wflow_msg_final <- if (is.null(res$wflow_msg) || res$wflow_msg == "") "Update analysis" else res$wflow_msg
     git_msg_final <- if (is.null(res$git_msg) || res$git_msg == "") "Update project files" else res$git_msg
 
-    # 0. PULL CHANGES (Native OS Call)
-    if (res$do_pull) {
-      cli::cli_alert_info("Pulling latest changes from GitHub...")
-      pull_out <- suppressWarnings(system2("git", args = "pull", stdout = TRUE, stderr = TRUE))
-      if (!is.null(attr(pull_out, "status")) && attr(pull_out, "status") != 0) {
-        cli::cli_alert_danger("Pull failed (likely a merge conflict):")
-        cli::cli_text(cli::col_grey(paste(pull_out, collapse = "\n")))
-        cli::cli_alert_warning("Sync aborted to protect your files. Please resolve the conflict manually in the terminal.")
-        return(invisible(res))
-      }
-      cli::cli_alert_success("Successfully pulled changes.")
-    }
-
-    # 1. RENV SNAPSHOT
-    if (res$do_snapshot) {
-      cli::cli_alert_info("Running renv::snapshot()...")
-      tryCatch({
-        renv::snapshot(prompt = FALSE)
-        cli::cli_alert_success("renv.lock updated.")
-
-        if (!("renv.lock" %in% res$git_files)) {
-          res$git_files <- c(res$git_files, "renv.lock")
-        }
-      }, error = function(e) cli::cli_alert_danger("renv snapshot failed: {e$message}"))
-    }
-
-    # 2. WORKFLOWR PUBLISH
-    if (length(res$wflow_files) > 0) {
-      cli::cli_alert_info("Publishing via Workflowr...")
-      tryCatch({
-        workflowr::wflow_publish(res$wflow_files, message = wflow_msg_final)
-        cli::cli_alert_success("Successfully built and committed .Rmd files!")
-      }, error = function(e) cli::cli_alert_danger("Workflowr publish failed: {e$message}"))
-    }
-
-    # 3. GIT COMMIT (Standard Files - Local gert is fine here)
     if (length(res$git_files) > 0) {
-      cli::cli_alert_info("Staging and committing standard files...")
+      message(sprintf("2. Preparing to commit %d files...", length(res$git_files))); flush.console()
+
+      message("   -> Running git_add()..."); flush.console()
+      gert::git_add(res$git_files)
+
+      message("   -> Running git_commit()..."); flush.console()
       tryCatch({
-        gert::git_add(res$git_files)
         gert::git_commit(message = git_msg_final)
-        cli::cli_alert_success("Standard files committed.")
-      }, error = function(e) cli::cli_alert_danger("Git commit failed: {e$message}"))
+        message("   -> Commit successful."); flush.console()
+      }, error = function(e) {
+        message(sprintf("   -> COMMIT ERROR: %s", e$message)); flush.console()
+      })
     }
 
-    # 4. GIT PUSH (Native OS Call - Pushes Everything!)
     made_changes <- res$do_snapshot || length(res$wflow_files) > 0 || length(res$git_files) > 0
     if (made_changes || res$n_ahead > 0) {
-      cli::cli_alert_info("Pushing all commits to GitHub...")
-      push_out <- suppressWarnings(system2("git", args = "push", stdout = TRUE, stderr = TRUE))
+      message("3. Preparing to Native Push..."); flush.console()
 
-      if (!is.null(attr(push_out, "status")) && attr(push_out, "status") != 0) {
-        cli::cli_alert_danger("Git push failed:")
-        cli::cli_text(cli::col_red(paste(push_out, collapse = "\n")))
-      } else {
-        cli::cli_alert_success("Successfully pushed to GitHub!")
-      }
-    } else if (!res$do_pull) {
-      cli::cli_alert_info("No actions selected. Project remains unchanged.")
+      message("   -> Calling system2('git', 'push')..."); flush.console()
+      # By removing stdout=TRUE, we force Git to bleed any raw errors or
+      # hidden password prompts directly into the console in real-time.
+      exit_code <- system2("git", args = "push", stdout = "", stderr = "")
+
+      message(sprintf("   -> Push finished with exit code: %s", exit_code)); flush.console()
     }
 
-    # 5. FINAL VERIFICATION
-    cli::cli_h3("Final Verification")
-    final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 0, behind = 0))
-    if (!is.null(final_ab) && final_ab$ahead == 0 && final_ab$behind == 0) {
-      cli::cli_alert_success("All changes pushed! Your local project is perfectly in sync with GitHub.")
-    } else {
-      cli::cli_alert_warning("Sync completed, but there may still be unpushed commits or remote changes.")
-    }
-
+    message("4. Execution block finished."); flush.console()
   } else {
     cli::cli_alert_info("Sync cancelled by user. No changes made.")
   }
