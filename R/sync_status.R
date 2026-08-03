@@ -334,7 +334,7 @@ sync_status <- function() {
     # 5. FINAL VERIFICATION
     final_ab <- tryCatch(gert::git_ahead_behind(), error = function(e) list(ahead = 1, behind = 1))
     if (final_ab$ahead == 0 && final_ab$behind == 0) {
-      message("SUCCESS: Project perfectly synced!")
+      message("SUCCESS: Project synced!")
     }
   }
 }
