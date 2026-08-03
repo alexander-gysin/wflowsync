@@ -108,7 +108,7 @@ sync_status <- function() {
     git_title <- "Git & GitHub: Clean"
   }
 
-  # UI HELPER (Restored borders, tweaked padding for pane) -----------
+  # UI HELPER --------------------------------------------------------
   create_card <- function(title, color, body_ui) {
     shiny::tags$div(
       style = sprintf("border: 2px solid %s; border-radius: 8px; overflow: hidden; margin-bottom: 15px; background: white;", color),
@@ -143,7 +143,8 @@ sync_status <- function() {
         shiny::tabsetPanel(
           type = "tabs",
 
-          shiny::tabPanel("Workflowr", icon = shiny::icon("circle", style = sprintf("color: %s;", wf_color)),
+          # Added class = "fas" to force solid icons
+          shiny::tabPanel("Workflowr", icon = shiny::icon("circle", class = "fas", style = sprintf("color: %s;", wf_color)),
                           shiny::tags$div(style = "margin-top: 15px;",
                                           create_card(wf_title, wf_color,
                                                       if (wf_state == "missing") {
@@ -161,7 +162,7 @@ sync_status <- function() {
                           )
           ),
 
-          shiny::tabPanel("Git", icon = shiny::icon("circle", style = sprintf("color: %s;", git_color)),
+          shiny::tabPanel("Git", icon = shiny::icon("circle", class = "fas", style = sprintf("color: %s;", git_color)),
                           shiny::tags$div(style = "margin-top: 15px;",
                                           create_card(git_title, git_color,
                                                       shiny::tagList(
@@ -190,7 +191,7 @@ sync_status <- function() {
                           )
           ),
 
-          shiny::tabPanel("renv", icon = shiny::icon("circle", style = sprintf("color: %s;", renv_color)),
+          shiny::tabPanel("renv", icon = shiny::icon("circle", class = "fas", style = sprintf("color: %s;", renv_color)),
                           shiny::tags$div(style = "margin-top: 15px;",
                                           create_card(renv_title, renv_color,
                                                       if (renv_state == "missing") {
@@ -208,11 +209,12 @@ sync_status <- function() {
           )
         )
       } else {
-        # --- STEP 2: REVIEW & CONFIRM (Stacked vertically for narrow pane) ---
+        # --- STEP 2: REVIEW & CONFIRM ---
         shiny::tagList(
           shiny::p(style = "margin-bottom: 15px;", "Review your selections below:"),
 
-          create_card("1. Publish Review", "#17a2b8",
+          # Changed color to #007bff (true blue)
+          create_card("1. Publish Review", "#007bff",
                       if (length(input$wflow_cb) > 0) {
                         shiny::tagList(
                           shiny::p(shiny::tags$b("Message: "), if (is.null(input$wflow_msg) || input$wflow_msg == "") "Update analysis" else input$wflow_msg),
@@ -224,7 +226,7 @@ sync_status <- function() {
                       }
           ),
 
-          create_card("2. Commit Review", "#17a2b8",
+          create_card("2. Commit Review", "#007bff",
                       if (length(input$git_cb) > 0 || isTRUE(input$do_snapshot) || n_ahead > 0 || isTRUE(input$do_pull)) {
                         shiny::tagList(
                           if (isTRUE(input$do_pull)) shiny::p(style = "color: #28a745; font-weight: bold;", "\U00002193 Will pull changes from GitHub first."),
@@ -245,7 +247,7 @@ sync_status <- function() {
                       }
           ),
 
-          create_card("3. Snapshot Review", "#17a2b8",
+          create_card("3. Snapshot Review", "#007bff",
                       if (isTRUE(input$do_snapshot)) {
                         shiny::p("\U00002705 Will run ", shiny::tags$code("renv::snapshot()"), " and commit the updated lockfile.")
                       } else {
