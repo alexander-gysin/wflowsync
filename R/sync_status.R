@@ -20,44 +20,51 @@ sync_status <- function() {
   # 1. EVALUATE WORKFLOWR ------------------------------------------------
   has_wflow <- file.exists("_workflowr.yml") || file.exists("analysis/_site.yml")
   wflow_files <- character(0)
+  wf_scratch <- character(0)
+  wf_modified <- character(0)
+  wf_unpub <- character(0)
 
   if (!has_wflow) {
     wf_color <- col_red
-    wf_title <- "Workflowr: Not Configured"
+    wf_title <- "Workflowr: Action required"
     wf_state <- "missing"
   } else {
     ws <- tryCatch(workflowr::wflow_status(), error = function(e) NULL)
     if (!is.null(ws)) {
-      wflow_files <- rownames(ws$status)[ws$status$unpublished | ws$status$modified | ws$status$scratch]
+      wf_scratch <- ws$scratch
+      wf_modified <- ws$modified
+      wf_unpub <- ws$unpublished
+      wflow_files <- c(wf_scratch, wf_modified, wf_unpub)
     }
 
     if (length(wflow_files) > 0) {
       wf_color <- col_yellow
-      wf_title <- "Workflowr: Action Needed"
+      wf_title <- "Workflowr: Action required"
       wf_state <- "desync"
     } else {
       wf_color <- col_green
-      wf_title <- "Workflowr: Synced"
+      wf_title <- "Workflowr: No action required"
       wf_state <- "synced"
     }
   }
 
-  # 2. EVALUATE RENV ------------------------------------------------
+  # 2. EVALUATE RENV -----------------------------------------------------
+  renv_out <- character(0)
   if (!file.exists("renv.lock")) {
     renv_color <- col_red
-    renv_title <- "renv: Not Configured"
+    renv_title <- "renv: Action required"
     renv_state <- "missing"
   } else {
     suppressMessages(suppressWarnings({
-      rs <- tryCatch(renv::status(), error = function(e) list())
+      renv_out <- capture.output(rs <- tryCatch(renv::status(), error = function(e) list()))
     }))
     if (!is.null(rs$synchronized) && isFALSE(rs$synchronized)) {
       renv_color <- col_yellow
-      renv_title <- "renv: Out of Sync"
+      renv_title <- "renv: Action required"
       renv_state <- "desync"
     } else {
       renv_color <- col_green
-      renv_title <- "renv: Up to Date"
+      renv_title <- "renv: No action required"
       renv_state <- "synced"
     }
   }
@@ -99,13 +106,13 @@ sync_status <- function() {
 
   if (pat_state %in% c("missing", "expired")) {
     git_color <- col_red
-    git_title <- "Git & GitHub: Error"
+    git_title <- "Git & GitHub: Action required"
   } else if (pat_state == "warning" || length(git_files_only) > 0 || n_behind > 0 || n_ahead > 0) {
     git_color <- col_yellow
-    git_title <- "Git & GitHub: Action Needed"
+    git_title <- "Git & GitHub: Action required"
   } else {
     git_color <- col_green
-    git_title <- "Git & GitHub: Clean"
+    git_title <- "Git & GitHub: No action required"
   }
 
   # UI HELPER --------------------------------------------------------
@@ -120,7 +127,7 @@ sync_status <- function() {
     )
   }
 
-  # SHINY UI ------------------------------------------------
+  # SHINY UI ---------------------------------------------------------
   ui <- miniUI::miniPage(
     miniUI::gadgetTitleBar("wflowsync: Project Dashboard", right = NULL),
     miniUI::miniContentPanel(
@@ -132,10 +139,15 @@ sync_status <- function() {
     )
   )
 
-  # SHINY SERVER ------------------------------------------------
+  # SHINY SERVER -----------------------------------------------------
   server <- function(input, output, session) {
 
     rv <- shiny::reactiveValues(step = 1)
+
+    # Helper to gather all selected workflowr files across the 3 categories
+    get_wflow_selected <- shiny::reactive({
+      c(input$wflow_cb_scratch, input$wflow_cb_modified, input$wflow_cb_unpub)
+    })
 
     output$dynamic_ui <- shiny::renderUI({
       if (rv$step == 1) {
@@ -143,7 +155,6 @@ sync_status <- function() {
         shiny::tabsetPanel(
           type = "tabs",
 
-          # Added class = "fas" to force solid icons
           shiny::tabPanel("Workflowr", icon = shiny::icon("circle", class = "fas", style = sprintf("color: %s;", wf_color)),
                           shiny::tags$div(style = "margin-top: 15px;",
                                           create_card(wf_title, wf_color,
@@ -152,11 +163,33 @@ sync_status <- function() {
                                                       } else if (length(wflow_files) == 0) {
                                                         shiny::p(style = "color: grey; text-align: center; margin-top: 20px;", "All .Rmd files are compiled and synced.")
                                                       } else {
-                                                        shiny::tagList(
-                                                          shiny::p("Files to knit & publish:"),
-                                                          shiny::checkboxGroupInput("wflow_cb", label = NULL, choices = wflow_files, selected = wflow_files),
-                                                          shiny::textInput("wflow_msg", "Publish Message:", placeholder = "Update analysis")
-                                                        )
+                                                        # Build dynamic Workflowr UI blocks
+                                                        wf_ui_list <- list(shiny::p("Files to knit & publish:"))
+
+                                                        if (length(wf_scratch) > 0) {
+                                                          wf_ui_list <- append(wf_ui_list, list(
+                                                            shiny::tags$b("Scratch"),
+                                                            shiny::tags$div(style = "color: grey; font-size: 0.9em; margin-bottom: 5px;", "Files that are in the analysis directory but not yet tracked by workflowr."),
+                                                            shiny::checkboxGroupInput("wflow_cb_scratch", label = NULL, choices = wf_scratch, selected = wf_scratch)
+                                                          ))
+                                                        }
+                                                        if (length(wf_modified) > 0) {
+                                                          wf_ui_list <- append(wf_ui_list, list(
+                                                            shiny::tags$b("Modified"),
+                                                            shiny::tags$div(style = "color: grey; font-size: 0.9em; margin-bottom: 5px;", "Rmd files that have been modified since the last build."),
+                                                            shiny::checkboxGroupInput("wflow_cb_modified", label = NULL, choices = wf_modified, selected = wf_modified)
+                                                          ))
+                                                        }
+                                                        if (length(wf_unpub) > 0) {
+                                                          wf_ui_list <- append(wf_ui_list, list(
+                                                            shiny::tags$b("Unpublished"),
+                                                            shiny::tags$div(style = "color: grey; font-size: 0.9em; margin-bottom: 5px;", "Built HTML files that have not yet been committed to Git."),
+                                                            shiny::checkboxGroupInput("wflow_cb_unpub", label = NULL, choices = wf_unpub, selected = wf_unpub)
+                                                          ))
+                                                        }
+
+                                                        wf_ui_list <- append(wf_ui_list, list(shiny::textInput("wflow_msg", "Publish Message:", placeholder = "Update analysis")))
+                                                        do.call(shiny::tagList, wf_ui_list)
                                                       }
                                           )
                           )
@@ -198,7 +231,8 @@ sync_status <- function() {
                                                         shiny::p(style = "color: #dc3545; font-weight: bold;", "Run renv::init() to set up package tracking.")
                                                       } else if (renv_state == "desync") {
                                                         shiny::tagList(
-                                                          shiny::p("Your local R library has unsaved package changes."),
+                                                          shiny::tags$pre(style = "background-color: #f8f9fa; padding: 10px; border: 1px solid #ccc; border-radius: 4px; overflow-x: auto; font-size: 0.85em; color: #333;",
+                                                                          paste(renv_out, collapse = "\n")),
                                                           shiny::checkboxInput("do_snapshot", shiny::tags$b("Run renv::snapshot()"), value = TRUE)
                                                         )
                                                       } else {
@@ -213,13 +247,12 @@ sync_status <- function() {
         shiny::tagList(
           shiny::p(style = "margin-bottom: 15px;", "Review your selections below:"),
 
-          # Changed color to #007bff (true blue)
           create_card("1. Publish Review", "#007bff",
-                      if (length(input$wflow_cb) > 0) {
+                      if (length(get_wflow_selected()) > 0) {
                         shiny::tagList(
                           shiny::p(shiny::tags$b("Message: "), if (is.null(input$wflow_msg) || input$wflow_msg == "") "Update analysis" else input$wflow_msg),
                           shiny::p(shiny::tags$b("Files to knit & publish:")),
-                          shiny::tags$ul(lapply(input$wflow_cb, shiny::tags$li))
+                          shiny::tags$ul(lapply(get_wflow_selected(), shiny::tags$li))
                         )
                       } else {
                         shiny::p(style = "color: grey;", "No .Rmd files selected for publishing.")
@@ -277,7 +310,7 @@ sync_status <- function() {
         action = "execute",
         do_pull = isTRUE(input$do_pull),
         do_snapshot = isTRUE(input$do_snapshot),
-        wflow_files = input$wflow_cb,
+        wflow_files = get_wflow_selected(),
         wflow_msg = input$wflow_msg,
         git_files = input$git_cb,
         git_msg = input$git_msg,

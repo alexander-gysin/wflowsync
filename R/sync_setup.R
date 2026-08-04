@@ -42,9 +42,9 @@ sync_setup <- function() {
 
   cli::cli_h1("wflowsync Setup Wizard")
 
-  # =========================================================================
-  # STEP 1: WORKFLOWR
-  # =========================================================================
+
+  # STEP 1: WORKFLOWR -------------------------------------------------------
+
   cli::cli_h2("1. Workflowr Configuration")
 
   has_wflow <- file.exists("_workflowr.yml") || file.exists("analysis/_site.yml")
@@ -89,9 +89,9 @@ sync_setup <- function() {
     }
   }
 
-  # =========================================================================
-  # STEP 2: RENV
-  # =========================================================================
+
+  # STEP 2: RENV ------------------------------------------------------------
+
   cli::cli_h2("2. Package Tracking (renv)")
 
   # Clean up the dummy script from a previous run if it exists
@@ -121,9 +121,9 @@ sync_setup <- function() {
     cli::cli_alert_success("renv is already initialized.")
   }
 
-  # =========================================================================
-  # STEP 3: GITHUB PAT
-  # =========================================================================
+
+  # STEP 3: GITHUB PAT ------------------------------------------------------
+
   cli::cli_h2("3. GitHub Authentication")
 
   has_pat <- FALSE
