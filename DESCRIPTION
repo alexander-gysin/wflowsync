@@ -16,8 +16,10 @@ BugReports: https://github.com/alexander-gysin/wflowsync/issues
 Imports: 
     cli,
     gert,
+    gitcreds,
     miniUI,
     renv,
     rstudioapi,
     shiny,
+    usethis,
     workflowr
