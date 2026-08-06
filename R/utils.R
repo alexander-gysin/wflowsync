@@ -2,7 +2,10 @@
 # INTERNAL HELPER FUNCTIONS
 
 
-"%||%" <- function(a, b) if (!is.null(a) && a != "") a else b
+# Fallback operator: robust to vectors longer than 1
+"%||%" <- function(a, b) {
+  if (!is.null(a) && length(a) > 0 && any(a != "")) a else b
+}
 
 get_config_path <- function() {
   dir_path <- tools::R_user_dir("wflowsync", "config")
